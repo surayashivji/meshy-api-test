@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meshy API Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://threejs.org/examples/js/loaders/GLTFLoader.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        .upload-area:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .image-preview {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        .test-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            cursor: pointer;
+        }
+
+        .test-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .result.success {
+            background: #dcfce7;
+            color: #166534;
+            display: block;
+        }
+
+        .result.error {
+            background: #fef2f2;
+            color: #dc2626;
+            display: block;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 Meshy API Test</h1>
+            <p>Simple test to verify image-to-3D API pipeline</p>
+        </div>
+
+        <div class="upload-area" id="uploadArea">
+            <div style="font-size: 2rem; margin-bottom: 10px;">📸</div>
+            <h3>Upload Image</h3>
+            <p>Click to select an image file</p>
+            <input type="file" id="imageInput" accept="image/*" style="display: none;">
+        </div>
+        
+        <img id="imagePreview" class="image-preview hidden" alt="Preview">
+        
+        <div class="input-group">
+            <label for="apiKey">Meshy API Key</label>
+            <input type="password" id="apiKey" placeholder="Enter your API key">
+        </div>
+        
+        <button class="test-btn" id="testBtn" disabled>🧪 Test API Call</button>
+        
+        <div class="result" id="result"></div>
+        
+        <div class="viewer-container" id="viewerContainer">
+            <div id="gltfViewer"></div>
+            <div class="viewer-info">🖱️ Click & drag to rotate • Scroll to zoom</div>
+        </div>
+    </div>
+
+    <script>
+        // Basic upload handling
+        const uploadArea = document.getElementById('uploadArea');
+        const imageInput = document.getElementById('imageInput');
+        const imagePreview = document.getElementById('imagePreview');
+        const testBtn = document.getElementById('testBtn');
+        const apiKeyInput = document.getElementById('apiKey');
+        const result = document.getElementById('result');
+        const viewerContainer = document.getElementById('viewerContainer');
+        
+        let scene, camera, renderer, controls;
+        
+        uploadArea.addEventListener('click', () => imageInput.click());
+        
+        imageInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    imagePreview.classList.remove('hidden');
+                    checkButton();
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        apiKeyInput.addEventListener('input', checkButton);
+        
+        function checkButton() {
+            const hasImage = !imagePreview.classList.contains('hidden');
+            const hasKey = apiKeyInput.value.trim();
+            testBtn.disabled = !(hasImage && hasKey);
+        }
+        
+        // Simple API test with auto-polling
+        testBtn.addEventListener('click', async () => {
+            testBtn.disabled = true;
+            testBtn.textContent = 'Testing...';
+            result.style.display = 'none';
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/meshy/create', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKeyInput.value.trim()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image_url: imagePreview.src,
+                        enable_pbr: true,
+                        topology: "quad",
+                        target_polycount: 30000,  // Much higher for quality
+                        resolution: "1024",
+                        surface_mode: "hard",     // May help with surface quality
+                        art_style: "realistic"    // Force realistic style
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.result) {
+                    // Show processing status
+                    result.className = 'result processing';
+                    result.style.display = 'block';  // Fix: Force show result
+                    result.innerHTML = `<div class="loader"></div>Processing 3D model... Task ID: ${data.result}`;
+                    
+                    // Start polling for completion
+                    pollForCompletion(data.result, apiKeyInput.value.trim());
+                } else {
+                    result.className = 'result error';
+                    result.style.display = 'block';  // Fix: Force show result
+                    result.textContent = `❌ Error: ${JSON.stringify(data)}`;
+                    testBtn.disabled = false;
+                    testBtn.textContent = '🧪 Test API Call';
+                }
+                
+            } catch (error) {
+                result.className = 'result error';
+                result.textContent = `❌ Error: ${error.message}`;
+                testBtn.disabled = false;
+                testBtn.textContent = '🧪 Test API Call';
+            }
+        });
+        
+        // Poll until model is ready
+        async function pollForCompletion(taskId, apiKey) {
+            let attempts = 0;
+            const maxAttempts = 60; // 5 minutes max
+            
+            const checkStatus = async () => {
+                try {
+                    console.log(`Checking status for task: ${taskId}, attempt: ${attempts + 1}`);
+                    
+                    const response = await fetch(`http://localhost:3001/api/meshy/status/${taskId}`, {
+                        headers: { 'Authorization': `Bearer ${apiKey}` }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Status check failed: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    console.log('Status response:', data);
+                    
+                    if (data.status === 'SUCCEEDED') {
+                        // Model is ready!
+                        result.className = 'result success';
+                        result.style.display = 'block';  // Fix: Force show result
+                        result.innerHTML = `
+                            ✅ Model ready! 
+                            <br><a href="${data.model_urls.glb}" download="model.glb" class="download-btn">📥 Download GLB</a>
+                            <button onclick="loadModelInViewer('${data.model_urls.glb}')" class="download-btn" style="margin-left: 10px;">👁️ View 3D</button>
+                        `;
+                        testBtn.disabled = false;
+                        testBtn.textContent = '🧪 Test API Call';
+                        console.log('✅ Model ready for download!');
+                        
+                    } else if (data.status === 'FAILED') {
+                        result.className = 'result error';
+                        result.style.display = 'block';  // Fix: Force show result
+                        result.textContent = '❌ Model generation failed';
+                        testBtn.disabled = false;
+                        testBtn.textContent = '🧪 Test API Call';
+                        
+                    } else {
+                        // Still processing
+                        const status = data.status || 'PENDING';
+                        result.className = 'result processing';
+                        result.style.display = 'block';  // Fix: Force show result
+                        result.innerHTML = `<div class="loader"></div>Processing... Status: ${status} (${attempts + 1}/${maxAttempts})`;
+                        attempts++;
+                        
+                        if (attempts < maxAttempts) {
+                            setTimeout(checkStatus, 5000); // Check every 5 seconds
+                        } else {
+                            result.className = 'result error';
+                            result.style.display = 'block';  // Fix: Force show result
+                            result.textContent = '❌ Timeout - model took too long to process';
+                            testBtn.disabled = false;
+                            testBtn.textContent = '🧪 Test API Call';
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('Status check error:', error);
+                    result.className = 'result error';
+                    result.style.display = 'block';  // Fix: Force show result
+                    result.textContent = `❌ Status check failed: ${error.message}`;
+                    testBtn.disabled = false;
+                    testBtn.textContent = '🧪 Test API Call';
+                }
+            };
+            
+            checkStatus();
+        }
+        
+        // GLTF Viewer Functions - Simple version without external loaders
+        function initViewer() {
+            const container = document.getElementById('gltfViewer');
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+            
+            camera = new THREE.PerspectiveCamera(75, container.offsetWidth / container.offsetHeight, 0.1, 1000);
+            camera.position.set(3, 3, 3);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.offsetWidth, container.offsetHeight);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+            
+            // Simple mouse controls
+            let mouseDown = false;
+            let mousePos = { x: 0, y: 0 };
+            
+            container.addEventListener('mousedown', (e) => {
+                mouseDown = true;
+                mousePos.x = e.clientX;
+                mousePos.y = e.clientY;
+            });
+            
+            container.addEventListener('mouseup', () => mouseDown = false);
+            
+            container.addEventListener('mousemove', (e) => {
+                if (mouseDown) {
+                    const deltaX = e.clientX - mousePos.x;
+                    const deltaY = e.clientY - mousePos.y;
+                    
+                    const spherical = new THREE.Spherical();
+                    spherical.setFromVector3(camera.position);
+                    spherical.theta -= deltaX * 0.01;
+                    spherical.phi += deltaY * 0.01;
+                    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+                    
+                    camera.position.setFromSpherical(spherical);
+                    camera.lookAt(0, 0, 0);
+                    
+                    mousePos.x = e.clientX;
+                    mousePos.y = e.clientY;
+                }
+            });
+            
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const scale = e.deltaY > 0 ? 1.1 : 0.9;
+                camera.position.multiplyScalar(scale);
+                camera.position.clampLength(1, 20);
+            });
+            
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 5, 5);
+            scene.add(directionalLight);
+            
+            animate();
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        
+        window.loadModelInViewer = function(modelUrl) {
+            console.log('Loading model:', modelUrl);
+            viewerContainer.classList.add('show');
+            
+            if (!renderer) {
+                initViewer();
+            }
+            
+            // Update viewer info to show loading
+            const viewerInfo = document.querySelector('.viewer-info');
+            viewerInfo.innerHTML = '⏳ Loading 3D model...';
+            
+            // Load the actual GLB model
+            const loader = new THREE.GLTFLoader();
+            loader.load(
+                modelUrl,
+                function (gltf) {
+                    console.log('✅ GLB model loaded successfully!');
+                    
+                    // Clear previous model
+                    const existingModel = scene.getObjectByName('loadedModel');
+                    if (existingModel) scene.remove(existingModel);
+                    
+                    const model = gltf.scene;
+                    model.name = 'loadedModel';
+                    
+                    // Auto-center and scale the model
+                    const box = new THREE.Box3().setFromObject(model);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxSize = Math.max(size.x, size.y, size.z);
+                    const scale = 2 / maxSize; // Scale to fit in 2-unit cube
+                    
+                    model.position.sub(center); // Center the model
+                    model.scale.setScalar(scale); // Scale appropriately
+                    
+                    // Enable shadows
+                    model.traverse((child) => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+                    
+                    scene.add(model);
+                    
+                    // Update viewer info
+                    viewerInfo.innerHTML = '🖱️ Click & drag to rotate • Scroll to zoom • <a href="' + modelUrl + '" style="color: #10b981;">Download GLB</a>';
+                },
+                function (progress) {
+                    console.log('Loading progress:', progress);
+                    const percent = Math.round((progress.loaded / progress.total) * 100);
+                    const viewerInfo = document.querySelector('.viewer-info');
+                    viewerInfo.innerHTML = `⏳ Loading: ${percent}%`;
+                },
+                function (error) {
+                    console.error('❌ Error loading GLB model:', error);
+                    
+                    // Show error and fallback
+                    const viewerInfo = document.querySelector('.viewer-info');
+                    viewerInfo.innerHTML = '❌ Could not load 3D model • <a href="' + modelUrl + '" style="color: #10b981;">Download GLB</a>';
+                    
+                    // Show a placeholder cube as fallback
+                    const geometry = new THREE.BoxGeometry(1, 1, 1);
+                    const material = new THREE.MeshLambertMaterial({ 
+                        color: 0xff6b6b,
+                        transparent: true,
+                        opacity: 0.5 
+                    });
+                    const cube = new THREE.Mesh(geometry, material);
+                    cube.name = 'loadedModel';
+                    scene.add(cube);
+                }
+            );
+        }
+    </script>
+</body>
+</html>
